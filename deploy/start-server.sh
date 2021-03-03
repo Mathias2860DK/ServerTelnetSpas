@@ -1,0 +1,1 @@
+java -cp quizTB-1.0-SNAPSHOT.jar serverTB.EchoServer 5555
