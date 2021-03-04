@@ -7,6 +7,7 @@ import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
 
@@ -17,6 +18,22 @@ class ClientHandler extends Thread{
     String  name;
     Dispatcherr dispatcherr;
     BlockingQueue<String> allMessageQueue;
+
+    public BlockingQueue<String> getAllMessageQueue() {
+        return allMessageQueue;
+    }
+
+    @Override
+    public String toString() {
+        return "ClientHandler{" +
+                "client=" + client +
+                ", br=" + br +
+                ", pw=" + pw +
+                ", name='" + name + '\'' +
+                ", dispatcherr=" + dispatcherr +
+                ", allMessageQueue=" + allMessageQueue +
+                '}';
+    }
 
     public ClientHandler(Socket client, Dispatcherr dispatcherr) {
         this.dispatcherr = dispatcherr;
@@ -29,14 +46,11 @@ class ClientHandler extends Thread{
         }
     }
 
-    public ClientHandler (Socket socket, PrintWriter pr, BufferedReader br, BlockingQueue allMsgQ){
+    public ClientHandler (PrintWriter pw, BufferedReader br, BlockingQueue allMsgQ, String name){
 this.allMessageQueue = allMsgQ;
-        try {
-            this.br = new BufferedReader(new InputStreamReader(client.getInputStream()));
-            this.pw = new PrintWriter(client.getOutputStream(),true);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    this.pw = pw;
+    this.br = br;
+    this.name = name;
     }
 
     public ClientHandler(Socket client) {
@@ -77,10 +91,18 @@ this.allMessageQueue = allMsgQ;
                 case "REVERSED" : reversed();break;
                 case "TRANSLATE" : translate();break;
                 case "ALL" : talkToAll();break;
+                case "ONE" : talkToOnePerson();break;
                 default: pw.println("prøv igen");
             }
         }
         client.close(); //lukker connection
+    }
+
+    private void talkToOnePerson() throws IOException {
+        pw.println("Hvem vil du sende en besked til?");
+        String msgToOne = br.readLine();
+
+
     }
 
     private void talkToAll() throws IOException {
@@ -188,29 +210,45 @@ this.allMessageQueue = allMsgQ;
     }
 }
 
-class Dispatcherr {
-    //List<Socket> clients;
-    List<PrintWriter> clients;
+class Dispatcherr extends Thread {
+    List<Socket> clients;
+    BlockingQueue<PrintWriter> allWriters;
+    BlockingQueue<String> allMsg;
 
-    public Dispatcherr() {
-        clients = new ArrayList<>();
+    public Dispatcherr(BlockingQueue<String> allMsg) {
+        this.allMsg = allMsg;
+        this.allWriters = new ArrayBlockingQueue<>(200);
     }
 
-    public void addClientToList (PrintWriter pw){
-        clients.add(pw);
+    public void addWriterToList (PrintWriter pw){
+        allWriters.add(pw);
     }
 
-    public void sendThisToAll(String msgToAll){
-        //TODO: loop through all clients and send message
-        EchoServer.getClientHandlers();
-
+    @Override
+    public void run() {
+        //tjek køen og send besked til alle
+        while (true){
+            try {
+                String msg = allMsg.take();
+                sendMessageToAll(msg);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
+    private void sendMessageToAll(String msg) {
+        for (PrintWriter pw : allWriters) {
+            pw.println(msg);
+        }
+    }
 }
 
 public class EchoServer {
     public static final int DEFAULT_PORT = 2345;
     public static List<ClientHandler> clientHandlers;
+    public static BlockingQueue<String> allMsg = new ArrayBlockingQueue<>(250);
+    public static String name;
 
     public static List<ClientHandler> getClientHandlers() {
         return clientHandlers;
@@ -218,22 +256,33 @@ public class EchoServer {
 
     public static void main(String[] args) throws IOException {
         int port = 8188;
+
         clientHandlers = new ArrayList<>();
         ServerSocket ss = new ServerSocket(8189);
+        Dispatcherr dispatcherr = new Dispatcherr(allMsg);
+        dispatcherr.start();
         if (args.length==1) {
             port=Integer.parseInt(args[0]);
         }
         try {
             while (true) {
+                System.out.println("Waiting for client ");
 
                 Socket client = ss.accept();
+
+                BufferedReader br = new BufferedReader(new InputStreamReader(client.getInputStream()));
+                PrintWriter pw = new PrintWriter(client.getOutputStream(),true);
+                dispatcherr.addWriterToList(pw);
 
                 //DataInputStream ds = new DataInputStream(client.getInputStream());
                 //InputStreamReader ir = new InputStreamReader(client.getInputStream());
                 //Scanner sc = new Scanner(ir);
-                ClientHandler cl = new ClientHandler(client);
+                ClientHandler cl = new ClientHandler(pw,br,allMsg,name);
                 clientHandlers.add(cl);
+                pw.println(clientHandlers.get(0));
+                pw.println(cl.getAllMessageQueue());
                 cl.start();
+                //System.out.println(cl.getName());
             }
 
         } catch (IOException e) {
